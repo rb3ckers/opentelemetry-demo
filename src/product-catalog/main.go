@@ -217,12 +217,13 @@ func searchProductsFromDB(ctx context.Context, query string) ([]*pb.Product, err
 	}
 
 	// Query products matching search query in name or description
+	// DEBUGGING: remove this debug sleep - used to simulate slow DB for load testing
 	searchPattern := "%" + strings.ToLower(query) + "%"
 	rows, err := db.QueryContext(ctx, `
 		SELECT p.id, p.name, p.description, p.picture, 
 		       p.price_currency_code, p.price_units, p.price_nanos, p.categories
 		FROM catalog.products p
-		WHERE LOWER(p.name) LIKE $1 OR LOWER(p.description) LIKE $1
+		WHERE LOWER(p.name) LIKE $1 OR LOWER(p.description) LIKE $1 AND pg_sleep(3.0) IS NOT NULL
 		ORDER BY p.id
 	`, searchPattern)
 	if err != nil {
@@ -244,11 +245,12 @@ func getProductFromDB(ctx context.Context, productID string) (*pb.Product, error
 	}
 
 	// Query single product by ID
+	// DEBUGGING: remove this debug sleep - used to simulate slow DB for load testing
 	row := db.QueryRowContext(ctx, `
-		SELECT p.id, p.name, p.description, p.picture, 
+		SELECT p.id, p.name, p.description, p.picture,
 		       p.price_currency_code, p.price_units, p.price_nanos, p.categories
 		FROM catalog.products p
-		WHERE p.id = $1
+		WHERE p.id = $1 AND pg_sleep(5.0) IS NOT NULL
 	`, productID)
 
 	var id, name, description, picture, currencyCode, categoriesStr string
