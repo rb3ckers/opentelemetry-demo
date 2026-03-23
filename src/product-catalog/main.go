@@ -201,6 +201,7 @@ func loadProductsFromDB(ctx context.Context) ([]*pb.Product, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to query products: %w", err)
 	}
+	defer rows.Close()
 
 	products, err := getProductsFromRows(ctx, rows)
 	if err != nil {
@@ -227,6 +228,7 @@ func searchProductsFromDB(ctx context.Context, query string) ([]*pb.Product, err
 	if err != nil {
 		return nil, fmt.Errorf("failed to query products: %w", err)
 	}
+	defer rows.Close()
 
 	products, err := getProductsFromRows(ctx, rows)
 	if err != nil {
@@ -241,44 +243,26 @@ func getProductFromDB(ctx context.Context, productID string) (*pb.Product, error
 		return nil, fmt.Errorf("database connection not initialized")
 	}
 
-	// Fix: use case-insensitive matching to handle product ID casing issues
-	// reported in issue #4217. Parameterized queries don't support ILIKE
-	// properly with all drivers, so we load and filter in Go to be safe.
-	rows, err := db.QueryContext(ctx, `
-		SELECT p.id, p.name, p.description, p.picture,
+	// Query single product by ID
+	row := db.QueryRowContext(ctx, `
+		SELECT p.id, p.name, p.description, p.picture, 
 		       p.price_currency_code, p.price_units, p.price_nanos, p.categories
 		FROM catalog.products p
-		ORDER BY p.id
-	`)
-	if err != nil {
-		return nil, fmt.Errorf("failed to query products: %w", err)
-	}
+		WHERE p.id = $1
+	`, productID)
 
-	var found *pb.Product
-	for rows.Next() {
-		var id, name, description, picture, currencyCode, categoriesStr string
-		var units int64
-		var nanos int32
+	var id, name, description, picture, currencyCode, categoriesStr string
+	var units int64
+	var nanos int32
 
-		if err := rows.Scan(&id, &name, &description, &picture, &currencyCode, &units, &nanos, &categoriesStr); err != nil {
-			return nil, fmt.Errorf("failed to scan product row: %w", err)
+	if err := row.Scan(&id, &name, &description, &picture, &currencyCode, &units, &nanos, &categoriesStr); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, fmt.Errorf("product not found")
 		}
-
-		if strings.EqualFold(id, productID) {
-			found = parseProductRow(id, name, description, picture, currencyCode, categoriesStr, units, nanos)
-			// Don't break - need to consume all rows to avoid connection issues
-		}
+		return nil, fmt.Errorf("failed to scan product row: %w", err)
 	}
 
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("error iterating product rows: %w", err)
-	}
-
-	if found == nil {
-		return nil, fmt.Errorf("product not found")
-	}
-
-	return found, nil
+	return parseProductRow(id, name, description, picture, currencyCode, categoriesStr, units, nanos), nil
 }
 
 func getProductsFromRows(ctx context.Context, rows *sql.Rows) ([]*pb.Product, error) {
